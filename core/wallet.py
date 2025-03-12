@@ -4,6 +4,10 @@ Wallet management module for Monad blockchain interaction.
 
 import json
 import os
+import secrets
+import base64
+import os
+
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Tuple
 
@@ -13,6 +17,10 @@ from eth_typing import ChecksumAddress, HexStr
 from web3 import Web3
 from web3.contract import Contract
 from web3.types import TxParams, Wei, TxReceipt
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
 
 from ..config import settings
 from .exceptions import InsufficientFundsError, WalletError
@@ -97,31 +105,88 @@ class Wallet:
             account=account
         )
         
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, encrypt=False, password=None) -> Dict[str, Any]:
         """
         Convert wallet to a dictionary for serialization.
         
+        Args:
+            encrypt: Whether to encrypt the private key
+            password: Password for encryption (required if encrypt=True)
+            
         Returns:
             Dict[str, Any]: Wallet details
         """
-        return {
+        data = {
             "name": self.name,
             "address": self.address,
-            "private_key": self._private_key if self._private_key else None
         }
+        
+        if self._private_key:
+            if encrypt and password:
+                # Generate a salt
+                salt = os.urandom(16)
+                
+                # Generate encryption key from password
+                kdf = PBKDF2HMAC(
+                    algorithm=hashes.SHA256(),
+                    length=32,
+                    salt=salt,
+                    iterations=100000,
+                )
+                key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
+                
+                # Encrypt the private key
+                f = Fernet(key)
+                encrypted_key = f.encrypt(self._private_key.encode()).decode()
+                
+                # Store encrypted key and salt
+                data["private_key_encrypted"] = encrypted_key
+                data["salt"] = base64.b64encode(salt).decode()
+            else:
+                # Store unencrypted
+                data["private_key"] = self._private_key
+                
+        return data
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Wallet":
+    def from_dict(cls, data: Dict[str, Any], password: Optional[str] = None) -> "Wallet":
         """
         Create a wallet from a dictionary.
         
         Args:
             data: Dictionary with wallet details
+            password: Password for decryption (if needed)
             
         Returns:
             Wallet: Configured wallet instance
         """
-        if data.get("private_key"):
+        # Check if we have an encrypted private key
+        if "private_key_encrypted" in data and password:
+            try:
+                # Get the salt
+                salt = base64.b64decode(data["salt"])
+                
+                # Recreate the key
+                kdf = PBKDF2HMAC(
+                    algorithm=hashes.SHA256(),
+                    length=32,
+                    salt=salt,
+                    iterations=100000,
+                )
+                key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
+                
+                # Decrypt the private key
+                f = Fernet(key)
+                private_key = f.decrypt(data["private_key_encrypted"].encode()).decode()
+                
+                return cls.from_private_key(
+                    name=data["name"],
+                    private_key=private_key
+                )
+            except Exception as e:
+                raise ValueError(f"Failed to decrypt wallet: {e}")
+                
+        elif "private_key" in data:
             return cls.from_private_key(
                 name=data["name"],
                 private_key=data["private_key"]
@@ -158,6 +223,7 @@ class WalletManager:
         self.client = client
         self.wallets: Dict[str, Wallet] = {}
         self.active_wallet_name: Optional[str] = None
+        self.password = None  # New field for wallet encryption
         
         # Load wallet directory if specified
         self.wallet_directory = os.getenv("WALLET_DIRECTORY", "wallets")
@@ -166,6 +232,16 @@ class WalletManager:
         if self.wallet_directory:
             os.makedirs(self.wallet_directory, exist_ok=True)
     
+    # New method for encryption
+    def set_encryption_password(self, password: str) -> None:
+        """
+        Set the password for wallet encryption/decryption.
+        
+        Args:
+            password: The password to use
+        """
+        self.password = password
+    
     @property
     def active_wallet(self) -> Optional[Wallet]:
         """Get the currently active wallet."""
@@ -173,21 +249,31 @@ class WalletManager:
             return None
         return self.wallets.get(self.active_wallet_name)
     
-    def load_wallets(self) -> None:
-        """Load wallets from the wallet directory."""
+    # Modified method to support encryption
+    def load_wallets(self, password: Optional[str] = None) -> None:
+        """
+        Load wallets from the wallet directory.
+        
+        Args:
+            password: Password for decrypting wallets (if needed)
+        """
         if not self.wallet_directory or not os.path.exists(self.wallet_directory):
             return
+        
+        decrypt_password = password or self.password
             
         wallet_files = Path(self.wallet_directory).glob("*.wallet")
         for wallet_file in wallet_files:
             try:
                 with open(wallet_file, "r") as f:
                     wallet_data = json.load(f)
-                    wallet = Wallet.from_dict(wallet_data)
-                    self.add_wallet(wallet)
+                    
+                wallet = Wallet.from_dict(wallet_data, decrypt_password)
+                self.add_wallet(wallet, save=False)  # Don't re-save
             except Exception as e:
                 print(f"Error loading wallet {wallet_file}: {e}")
     
+    # Modified method to support encryption
     def save_wallet(self, wallet_name: str) -> None:
         """
         Save a wallet to the wallet directory.
@@ -204,15 +290,26 @@ class WalletManager:
             
         wallet_path = Path(self.wallet_directory) / f"{wallet_name}.wallet"
         
+        # Encrypt if password is set
+        wallet_data = wallet.to_dict(encrypt=bool(self.password), password=self.password)
+        
         with open(wallet_path, "w") as f:
-            json.dump(wallet.to_dict(), f, indent=2)
+            json.dump(wallet_data, f, indent=2)
+        
+        # Set restrictive file permissions
+        try:
+            os.chmod(wallet_path, 0o600)  # Only owner can read/write
+        except Exception:
+            pass  # May not work on Windows
     
-    def add_wallet(self, wallet: Wallet) -> None:
+    # Modified method to support save flag
+    def add_wallet(self, wallet: Wallet, save: bool = True) -> None:
         """
         Add a wallet to the manager.
         
         Args:
             wallet: Wallet to add
+            save: Whether to save the wallet to disk
         """
         self.wallets[wallet.name] = wallet
         
@@ -220,9 +317,11 @@ class WalletManager:
         if len(self.wallets) == 1:
             self.set_active_wallet(wallet.name)
             
-        # Save wallet to file
-        self.save_wallet(wallet.name)
+        # Save wallet to file if requested
+        if save:
+            self.save_wallet(wallet.name)
     
+    # Keep existing method
     def add_wallet_from_private_key(self, name: str, private_key: str) -> Wallet:
         """
         Add a wallet from a private key.
@@ -238,6 +337,7 @@ class WalletManager:
         self.add_wallet(wallet)
         return wallet
     
+    # Keep existing method
     def add_wallet_from_mnemonic(self, name: str, mnemonic: str, path: str = "m/44'/60'/0'/0/0") -> Wallet:
         """
         Add a wallet from a mnemonic phrase.
@@ -254,6 +354,7 @@ class WalletManager:
         self.add_wallet(wallet)
         return wallet
     
+    # Keep existing method
     def remove_wallet(self, name: str) -> None:
         """
         Remove a wallet from the manager.
@@ -277,6 +378,7 @@ class WalletManager:
             if wallet_path.exists():
                 wallet_path.unlink()
     
+    # Keep existing method
     def set_active_wallet(self, name: str) -> None:
         """
         Set the active wallet.
@@ -297,6 +399,7 @@ class WalletManager:
         # Always update the client's wallet address
         self.client.wallet_address = active_wallet.address
     
+    # Keep existing method
     def list_wallets(self) -> List[Dict[str, Any]]:
         """
         List all available wallets.
@@ -314,6 +417,7 @@ class WalletManager:
             for name, wallet in self.wallets.items()
         ]
     
+    # Keep existing method
     def get_wallet(self, name: str) -> Wallet:
         """
         Get a wallet by name.
@@ -329,332 +433,22 @@ class WalletManager:
             
         return self.wallets[name]
 
-    async def get_balance(self, token_address: Optional[str] = None, wallet_name: Optional[str] = None) -> Union[float, int]:
+    # New method for wallet generation
+    def generate_wallet(self, name: str) -> Wallet:
         """
-        Get wallet balance for a token.
-
-        Args:
-            token_address: Token contract address (None for native ETH)
-            wallet_name: Name of the wallet to check (defaults to active wallet)
-
-        Returns:
-            Union[float, int]: Balance in token units
-        """
-        wallet = self._get_wallet_for_operation(wallet_name)
-
-        if token_address is None:
-            # Native token (ETH) balance
-            return self.client.get_eth_balance(wallet.address)
-        else:
-            # ERC20 token balance
-            return await self._get_erc20_balance(token_address, wallet.address)
-
-    async def _get_erc20_balance(self, token_address: str, wallet_address: str) -> float:
-        """
-        Get ERC20 token balance.
-
-        Args:
-            token_address: Token contract address
-            wallet_address: Address to check balance for
-
-        Returns:
-            float: Token balance in token units
-        """
-        # ERC20 standard ABI for balanceOf function
-        abi = [
-            {
-                "constant": True,
-                "inputs": [{"name": "_owner", "type": "address"}],
-                "name": "balanceOf",
-                "outputs": [{"name": "balance", "type": "uint256"}],
-                "type": "function",
-            },
-            {
-                "constant": True,
-                "inputs": [],
-                "name": "decimals",
-                "outputs": [{"name": "", "type": "uint8"}],
-                "type": "function",
-            },
-        ]
-
-        try:
-            token_contract = self.client.get_contract(token_address, abi)
-            balance = token_contract.functions.balanceOf(wallet_address).call()
-            
-            # Get token decimals for human-readable format
-            decimals = token_contract.functions.decimals().call()
-            
-            return balance / (10 ** decimals)
-        except Exception as e:
-            raise WalletError(f"Failed to get token balance: {e}")
-
-    async def transfer(
-        self,
-        to_address: str,
-        amount: Union[int, float],
-        token_address: Optional[str] = None,
-        gas_limit: Optional[int] = None,
-        gas_price: Optional[int] = None,
-        wallet_name: Optional[str] = None,
-    ) -> str:
-        """
-        Transfer tokens to another address.
-
-        Args:
-            to_address: Recipient address
-            amount: Amount to transfer
-            token_address: Token contract address (None for native ETH)
-            gas_limit: Gas limit
-            gas_price: Gas price
-            wallet_name: Name of the wallet to use (defaults to active wallet)
-
-        Returns:
-            str: Transaction hash
-        """
-        wallet = self._get_wallet_for_operation(wallet_name)
-        
-        # Temporarily set the active wallet if needed
-        original_active = self.active_wallet_name
-        if wallet.name != original_active:
-            self.set_active_wallet(wallet.name)
-        
-        try:
-            if token_address is None:
-                # Native token (ETH) transfer
-                result = await self._transfer_eth(to_address, amount, gas_limit, gas_price)
-            else:
-                # ERC20 token transfer
-                result = await self._transfer_erc20(token_address, to_address, amount, gas_limit, gas_price)
-                
-            return result
-        finally:
-            # Restore the original active wallet if we changed it
-            if wallet.name != original_active and original_active is not None:
-                self.set_active_wallet(original_active)
-
-    async def _transfer_eth(
-        self, to_address: str, amount: Union[int, float], gas_limit: Optional[int], gas_price: Optional[int]
-    ) -> str:
-        """
-        Transfer native ETH to another address.
-
-        Args:
-            to_address: Recipient address
-            amount: Amount to transfer in ETH
-            gas_limit: Optional gas limit
-            gas_price: Optional gas price
-
-        Returns:
-            str: Transaction hash
-        """
-        # Convert ETH to Wei
-        amount_wei = self.client.w3.to_wei(amount, "ether")
-        
-        # Check balance
-        balance = self.client.w3.eth.get_balance(self.client.wallet_address)
-        if balance < amount_wei:
-            raise InsufficientFundsError(
-                f"Insufficient ETH balance: have {self.client.w3.from_wei(balance, 'ether')} ETH, need {amount} ETH"
-            )
-        
-        # Prepare and send transaction
-        tx_params = await self.client.prepare_transaction(
-            to=to_address,
-            value=amount_wei,
-            gas_limit=gas_limit,
-            gas_price=gas_price
-        )
-        
-        return await self.client.send_transaction(tx_params)
-
-    async def _transfer_erc20(
-        self, token_address: str, to_address: str, amount: Union[int, float], gas_limit: Optional[int], gas_price: Optional[int]
-    ) -> str:
-        """
-        Transfer ERC20 tokens to another address.
-
-        Args:
-            token_address: Token contract address
-            to_address: Recipient address
-            amount: Amount to transfer in token units
-            gas_limit: Optional gas limit
-            gas_price: Optional gas price
-
-        Returns:
-            str: Transaction hash
-        """
-        # ERC20 standard ABI for transfer function
-        abi = [
-            {
-                "constant": False,
-                "inputs": [
-                    {"name": "_to", "type": "address"},
-                    {"name": "_value", "type": "uint256"}
-                ],
-                "name": "transfer",
-                "outputs": [{"name": "", "type": "bool"}],
-                "type": "function"
-            },
-            {
-                "constant": True,
-                "inputs": [],
-                "name": "decimals",
-                "outputs": [{"name": "", "type": "uint8"}],
-                "type": "function"
-            },
-            {
-                "constant": True,
-                "inputs": [{"name": "_owner", "type": "address"}],
-                "name": "balanceOf",
-                "outputs": [{"name": "balance", "type": "uint256"}],
-                "type": "function"
-            }
-        ]
-        
-        try:
-            # Get token contract
-            token_contract = self.client.get_contract(token_address, abi)
-            
-            # Get token decimals
-            decimals = token_contract.functions.decimals().call()
-            
-            # Convert amount to token units
-            amount_in_units = int(amount * (10 ** decimals))
-            
-            # Check token balance
-            balance = token_contract.functions.balanceOf(self.client.wallet_address).call()
-            if balance < amount_in_units:
-                raise InsufficientFundsError(
-                    f"Insufficient token balance: have {balance / (10 ** decimals)}, need {amount}"
-                )
-            
-            # Encode the transfer function call
-            transfer_function = token_contract.functions.transfer(
-                self.client.w3.to_checksum_address(to_address),
-                amount_in_units
-            )
-            
-            # Build the transaction
-            tx_params = await self.client.prepare_transaction(
-                to=token_address,
-                data=transfer_function.build_transaction()["data"],
-                gas_limit=gas_limit,
-                gas_price=gas_price
-            )
-            
-            # Send the transaction
-            return await self.client.send_transaction(tx_params)
-            
-        except InsufficientFundsError:
-            raise
-        except Exception as e:
-            raise WalletError(f"Failed to transfer tokens: {e}")
-
-    async def approve_token(
-        self, 
-        token_address: str, 
-        spender_address: str, 
-        amount: Union[int, float, str] = "unlimited",
-        wallet_name: Optional[str] = None
-    ) -> str:
-        """
-        Approve a spender to use tokens.
-
-        Args:
-            token_address: Token contract address
-            spender_address: Address to approve as spender
-            amount: Amount to approve (use "unlimited" for maximum)
-            wallet_name: Name of the wallet to use (defaults to active wallet)
-
-        Returns:
-            str: Transaction hash
-        """
-        wallet = self._get_wallet_for_operation(wallet_name)
-        
-        # Temporarily set the active wallet if needed
-        original_active = self.active_wallet_name
-        if wallet.name != original_active:
-            self.set_active_wallet(wallet.name)
-        
-        try:
-            # ERC20 standard ABI for approve function
-            abi = [
-                {
-                    "constant": False,
-                    "inputs": [
-                        {"name": "_spender", "type": "address"},
-                        {"name": "_value", "type": "uint256"}
-                    ],
-                    "name": "approve",
-                    "outputs": [{"name": "", "type": "bool"}],
-                    "type": "function"
-                },
-                {
-                    "constant": True,
-                    "inputs": [],
-                    "name": "decimals",
-                    "outputs": [{"name": "", "type": "uint8"}],
-                    "type": "function"
-                }
-            ]
-            
-            # Get token contract
-            token_contract = self.client.get_contract(token_address, abi)
-            
-            # Get token decimals
-            decimals = token_contract.functions.decimals().call()
-            
-            # Determine approval amount
-            if amount == "unlimited":
-                # Max uint256 value
-                amount_in_units = 2**256 - 1
-            else:
-                # Convert amount to token units
-                amount_in_units = int(float(amount) * (10 ** decimals))
-            
-            # Encode the approve function call
-            approve_function = token_contract.functions.approve(
-                self.client.w3.to_checksum_address(spender_address),
-                amount_in_units
-            )
-            
-            # Build the transaction
-            tx_params = await self.client.prepare_transaction(
-                to=token_address,
-                data=approve_function.build_transaction()["data"],
-            )
-            
-            # Send the transaction
-            return await self.client.send_transaction(tx_params)
-            
-        except Exception as e:
-            raise WalletError(f"Failed to approve tokens: {e}")
-        finally:
-            # Restore the original active wallet if we changed it
-            if wallet.name != original_active and original_active is not None:
-                self.set_active_wallet(original_active)
-    
-    def _get_wallet_for_operation(self, wallet_name: Optional[str] = None) -> Wallet:
-        """
-        Get the wallet to use for an operation.
+        Generate a new wallet with secure randomness.
         
         Args:
-            wallet_name: Name of the wallet to use (defaults to active wallet)
+            name: Name for the new wallet
             
         Returns:
-            Wallet: The wallet to use
+            Wallet: The generated wallet
         """
-        # Use specified wallet or fall back to active wallet
-        if wallet_name:
-            wallet = self.get_wallet(wallet_name)
-        else:
-            wallet = self.active_wallet
-            
-        if not wallet:
-            raise WalletError("No wallet specified and no active wallet set")
-            
-        if not wallet.has_private_key():
-            raise WalletError(f"Wallet {wallet.name} does not have a private key for signing transactions")
-            
+        # Generate random bytes for the private key with strong entropy
+        import secrets
+        private_key = "0x" + secrets.token_hex(32)
+        
+        # Create and add the wallet
+        wallet = Wallet.from_private_key(name=name, private_key=private_key)
+        self.add_wallet(wallet)
         return wallet

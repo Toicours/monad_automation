@@ -379,6 +379,27 @@ def info(rpc: Optional[str], network: Optional[str]):
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
+@wallets.command("generate")
+@click.argument("name", type=str)
+def wallet_generate(name: str):
+    """Generate a new wallet with secure randomness."""
+    try:
+        # Initialize client
+        client = _get_client()
+        
+        # Generate wallet
+        wallet = client.wallet.generate_wallet(name)
+        
+        click.echo(f"Generated new wallet '{name}'")
+        click.echo(f"Address: {wallet.address}")
+        click.echo(f"Private Key: {wallet._private_key}")
+        click.echo("\nWARNING: Store this private key securely and never share it!")
+        
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
 # Update _get_client function
 def _get_client(rpc_url: Optional[str] = None, network_name: Optional[str] = None) -> MonadClient:
     """
