@@ -312,3 +312,97 @@ def _get_client(rpc_url: Optional[str] = None) -> MonadClient:
 
 if __name__ == "__main__":
     cli()
+
+@cli.command("networks")
+def list_networks():
+    """List available networks."""
+    networks = settings.networks
+    
+    click.echo("Available networks:")
+    for net_key, network in networks.items():
+        active_marker = " (active)" if net_key == settings.DEFAULT_NETWORK else ""
+        testnet_marker = " [testnet]" if network.is_testnet else ""
+        click.echo(f"  {net_key}: {network.name}{testnet_marker}{active_marker}")
+        click.echo(f"    RPC: {network.rpc_url}")
+        click.echo(f"    Chain ID: {network.chain_id}")
+        
+@cli.command("set-network")
+@click.argument("network_name", type=str)
+def set_network(network_name: str):
+    """Set the active network."""
+    if network_name not in settings.networks:
+        click.echo(f"Error: Network '{network_name}' not found", err=True)
+        click.echo("Available networks:")
+        for net_key in settings.networks.keys():
+            click.echo(f"  - {net_key}")
+        sys.exit(1)
+    
+    # We can't actually modify settings at runtime, but we can:
+    # 1. Create a temporary .env.network file
+    # 2. Tell the user to update their .env file
+    
+    env_path = Path(".env.network")
+    with open(env_path, "w") as f:
+        f.write(f"DEFAULT_NETWORK={network_name}\n")
+    
+    click.echo(f"Created temporary network configuration in {env_path}")
+    click.echo(f"To permanently set '{network_name}' as your default network,")
+    click.echo(f"add 'DEFAULT_NETWORK={network_name}' to your .env file")
+
+# Update the info command to show network info
+@cli.command()
+@click.option("--rpc", type=str, help="RPC endpoint URL")
+@click.option("--network", type=str, help="Network to use")
+def info(rpc: Optional[str], network: Optional[str]):
+    """Display network and configuration information."""
+    try:
+        # Initialize client
+        client = _get_client(rpc, network)
+        
+        # Check connection
+        connected = client.is_connected()
+        
+        # Get network info
+        network_info = settings.networks.get(client.network_name, NetworkConfig(
+            name="Custom", rpc_url=client.rpc_url, chain_id=client.chain_id
+        ))
+        
+        click.echo(f"Network: {network_info.name} (chain ID: {network_info.chain_id})")
+        click.echo(f"RPC URL: {client.rpc_url}")
+        click.echo(f"Connected: {connected}")
+        
+        # Rest of the function...
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+# Update _get_client function
+def _get_client(rpc_url: Optional[str] = None, network_name: Optional[str] = None) -> MonadClient:
+    """
+    Get a Monad client instance.
+    
+    Args:
+        rpc_url: RPC endpoint URL (defaults to settings)
+        network_name: Network to use (defaults to settings.DEFAULT_NETWORK)
+        
+    Returns:
+        MonadClient: Initialized client
+    """
+    try:
+        if rpc_url:
+            # Use custom RPC URL with default chain ID if network not specified
+            chain_id = settings.MONAD_CHAIN_ID
+            if network_name and network_name in settings.networks:
+                chain_id = settings.networks[network_name].chain_id
+                
+            return MonadClient(
+                rpc_url=rpc_url,
+                chain_id=chain_id
+            )
+        else:
+            # Use network settings
+            return MonadClient.from_env(network_name)
+    except Exception as e:
+        logger.error(f"Failed to initialize Monad client: {e}")
+        raise

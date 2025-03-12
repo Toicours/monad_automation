@@ -57,20 +57,33 @@ class MonadClient:
             raise BlockchainConnectionError(f"Failed to connect to Monad blockchain at {rpc_url}")
 
     @classmethod
-    def from_env(cls) -> "MonadClient":
+    def from_env(cls, network_name: Optional[str] = None) -> "MonadClient":
         """
         Create a MonadClient instance from environment variables.
 
+        Args:
+            network_name: Name of the network to use (defaults to DEFAULT_NETWORK in settings)
+            
         Returns:
             MonadClient: Configured client instance
         """
         from .wallet import WalletManager  # Import here to avoid circular import
         
+        # Get network configuration
+        network_name = network_name or settings.DEFAULT_NETWORK
+        if network_name not in settings.networks:
+            raise ConfigurationError(f"Network {network_name} not found in settings")
+            
+        network = settings.networks[network_name]
+        
         # Create client
         client = cls(
-            rpc_url=settings.MONAD_RPC_URL,
-            chain_id=settings.MONAD_CHAIN_ID,
+            rpc_url=network.rpc_url,
+            chain_id=network.chain_id,
         )
+        
+        # Set network name
+        client.network_name = network_name
         
         # Create wallet manager
         wallet_manager = WalletManager(client)
