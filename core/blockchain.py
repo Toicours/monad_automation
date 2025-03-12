@@ -125,7 +125,11 @@ class MonadClient:
         
         # Update middleware for signing transactions
         # Remove existing middleware first to avoid duplicates
-        self.w3.middleware_onion.remove('sign_and_send_raw')
+        try:
+            self.w3.middleware_onion.remove('sign_and_send_raw')
+        except ValueError:
+            # Middleware wasn't added yet, that's ok
+            pass
         
         # Add new middleware
         self.w3.middleware_onion.add(

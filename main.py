@@ -11,13 +11,11 @@ from typing import Optional, List, Dict, Any
 import click
 from dotenv import load_dotenv
 
-from config import settings
+from config.settings import settings, NetworkConfig
 from core.blockchain import MonadClient
 from core.exceptions import MonadError
 from tasks.base import BaseTask, TaskResult
 from utils.logger import logger, setup_logger
-from config.settings import settings, NetworkConfig 
-
 
 # Load environment variables
 load_dotenv()
@@ -37,14 +35,22 @@ def cli(debug: bool, log_file: Optional[str]):
 
 @cli.command()
 @click.option("--rpc", type=str, help="RPC endpoint URL")
-def info(rpc: Optional[str]):
+@click.option("--network", type=str, help="Network to use")
+def info(rpc: Optional[str], network: Optional[str] = None):
     """Display network and configuration information."""
     try:
         # Initialize client
-        client = _get_client(rpc)
+        client = _get_client(rpc, network)
         
         # Check connection
         connected = client.is_connected()
+        
+        # Get network info
+        if hasattr(client, 'network_name') and hasattr(settings, 'networks'):
+            network_info = settings.networks.get(client.network_name, NetworkConfig(
+                name="Custom", rpc_url=client.rpc_url, chain_id=client.chain_id
+            ))
+            click.echo(f"Network: {network_info.name} (chain ID: {network_info.chain_id})")
         
         click.echo(f"RPC URL: {client.rpc_url}")
         click.echo(f"Chain ID: {client.chain_id}")
@@ -74,6 +80,47 @@ def info(rpc: Optional[str]):
         logger.error(f"Error: {e}")
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
+
+
+@cli.command("networks")
+def list_networks():
+    """List available networks."""
+    if hasattr(settings, 'networks'):
+        networks = settings.networks
+        
+        click.echo("Available networks:")
+        for net_key, network in networks.items():
+            active_marker = " (active)" if net_key == settings.DEFAULT_NETWORK else ""
+            testnet_marker = " [testnet]" if network.is_testnet else ""
+            click.echo(f"  {net_key}: {network.name}{testnet_marker}{active_marker}")
+            click.echo(f"    RPC: {network.rpc_url}")
+            click.echo(f"    Chain ID: {network.chain_id}")
+    else:
+        click.echo("No networks configured")
+        
+@cli.command("set-network")
+@click.argument("network_name", type=str)
+def set_network(network_name: str):
+    """Set the active network."""
+    if not hasattr(settings, 'networks') or network_name not in settings.networks:
+        click.echo(f"Error: Network '{network_name}' not found", err=True)
+        if hasattr(settings, 'networks'):
+            click.echo("Available networks:")
+            for net_key in settings.networks.keys():
+                click.echo(f"  - {net_key}")
+        sys.exit(1)
+    
+    # We can't actually modify settings at runtime, but we can:
+    # 1. Create a temporary .env.network file
+    # 2. Tell the user to update their .env file
+    
+    env_path = Path(".env.network")
+    with open(env_path, "w") as f:
+        f.write(f"DEFAULT_NETWORK={network_name}\n")
+    
+    click.echo(f"Created temporary network configuration in {env_path}")
+    click.echo(f"To permanently set '{network_name}' as your default network,")
+    click.echo(f"add 'DEFAULT_NETWORK={network_name}' to your .env file")
 
 
 @cli.group()
@@ -224,6 +271,28 @@ def wallet_balance(name: Optional[str], token: Optional[str]):
         sys.exit(1)
 
 
+@wallets.command("generate")
+@click.argument("name", type=str)
+def wallet_generate(name: str):
+    """Generate a new wallet with secure randomness."""
+    try:
+        # Initialize client
+        client = _get_client()
+        
+        # Generate wallet
+        wallet = client.wallet.generate_wallet(name)
+        
+        click.echo(f"Generated new wallet '{name}'")
+        click.echo(f"Address: {wallet.address}")
+        click.echo(f"Private Key: {wallet._private_key}")
+        click.echo("\nWARNING: Store this private key securely and never share it!")
+        
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
 @cli.group()
 def dex():
     """DEX operations."""
@@ -287,120 +356,6 @@ def swap(
         sys.exit(1)
 
 
-def _get_client(rpc_url: Optional[str] = None) -> MonadClient:
-    """
-    Get a Monad client instance.
-    
-    Args:
-        rpc_url: RPC endpoint URL (defaults to settings)
-        
-    Returns:
-        MonadClient: Initialized client
-    """
-    try:
-        if rpc_url:
-            # Use custom RPC URL
-            return MonadClient(
-                rpc_url=rpc_url,
-                chain_id=settings.MONAD_CHAIN_ID
-            )
-        else:
-            # Use settings
-            return MonadClient.from_env()
-    except Exception as e:
-        logger.error(f"Failed to initialize Monad client: {e}")
-        raise
-
-
-if __name__ == "__main__":
-    cli()
-
-@cli.command("networks")
-def list_networks():
-    """List available networks."""
-    networks = settings.networks
-    
-    click.echo("Available networks:")
-    for net_key, network in networks.items():
-        active_marker = " (active)" if net_key == settings.DEFAULT_NETWORK else ""
-        testnet_marker = " [testnet]" if network.is_testnet else ""
-        click.echo(f"  {net_key}: {network.name}{testnet_marker}{active_marker}")
-        click.echo(f"    RPC: {network.rpc_url}")
-        click.echo(f"    Chain ID: {network.chain_id}")
-        
-@cli.command("set-network")
-@click.argument("network_name", type=str)
-def set_network(network_name: str):
-    """Set the active network."""
-    if network_name not in settings.networks:
-        click.echo(f"Error: Network '{network_name}' not found", err=True)
-        click.echo("Available networks:")
-        for net_key in settings.networks.keys():
-            click.echo(f"  - {net_key}")
-        sys.exit(1)
-    
-    # We can't actually modify settings at runtime, but we can:
-    # 1. Create a temporary .env.network file
-    # 2. Tell the user to update their .env file
-    
-    env_path = Path(".env.network")
-    with open(env_path, "w") as f:
-        f.write(f"DEFAULT_NETWORK={network_name}\n")
-    
-    click.echo(f"Created temporary network configuration in {env_path}")
-    click.echo(f"To permanently set '{network_name}' as your default network,")
-    click.echo(f"add 'DEFAULT_NETWORK={network_name}' to your .env file")
-
-# Update the info command to show network info
-@cli.command()
-@click.option("--rpc", type=str, help="RPC endpoint URL")
-@click.option("--network", type=str, help="Network to use")
-def info(rpc: Optional[str], network: Optional[str]):
-    """Display network and configuration information."""
-    try:
-        # Initialize client
-        client = _get_client(rpc, network)
-        
-        # Check connection
-        connected = client.is_connected()
-        
-        # Get network info
-        network_info = settings.networks.get(client.network_name, NetworkConfig(
-            name="Custom", rpc_url=client.rpc_url, chain_id=client.chain_id
-        ))
-        
-        click.echo(f"Network: {network_info.name} (chain ID: {network_info.chain_id})")
-        click.echo(f"RPC URL: {client.rpc_url}")
-        click.echo(f"Connected: {connected}")
-        
-        # Rest of the function...
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-
-@wallets.command("generate")
-@click.argument("name", type=str)
-def wallet_generate(name: str):
-    """Generate a new wallet with secure randomness."""
-    try:
-        # Initialize client
-        client = _get_client()
-        
-        # Generate wallet
-        wallet = client.wallet.generate_wallet(name)
-        
-        click.echo(f"Generated new wallet '{name}'")
-        click.echo(f"Address: {wallet.address}")
-        click.echo(f"Private Key: {wallet._private_key}")
-        click.echo("\nWARNING: Store this private key securely and never share it!")
-        
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-
-# Update _get_client function
 def _get_client(rpc_url: Optional[str] = None, network_name: Optional[str] = None) -> MonadClient:
     """
     Get a Monad client instance.
@@ -416,7 +371,7 @@ def _get_client(rpc_url: Optional[str] = None, network_name: Optional[str] = Non
         if rpc_url:
             # Use custom RPC URL with default chain ID if network not specified
             chain_id = settings.MONAD_CHAIN_ID
-            if network_name and network_name in settings.networks:
+            if network_name and hasattr(settings, 'networks') and network_name in settings.networks:
                 chain_id = settings.networks[network_name].chain_id
                 
             return MonadClient(
@@ -429,3 +384,7 @@ def _get_client(rpc_url: Optional[str] = None, network_name: Optional[str] = Non
     except Exception as e:
         logger.error(f"Failed to initialize Monad client: {e}")
         raise
+
+
+if __name__ == "__main__":
+    cli()

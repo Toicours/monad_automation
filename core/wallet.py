@@ -6,10 +6,9 @@ import json
 import os
 import secrets
 import base64
-import os
 
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Any, Tuple
+from typing import Dict, List, Optional, Union, Any, Tuple, TYPE_CHECKING
 
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
@@ -21,13 +20,12 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-
 from config import settings
 from core.exceptions import InsufficientFundsError, WalletError
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from blockchain import MonadClient
+    from core.blockchain import MonadClient
+
 
 class Wallet:
     """Individual wallet for blockchain interactions."""
@@ -232,7 +230,6 @@ class WalletManager:
         if self.wallet_directory:
             os.makedirs(self.wallet_directory, exist_ok=True)
     
-    # New method for encryption
     def set_encryption_password(self, password: str) -> None:
         """
         Set the password for wallet encryption/decryption.
@@ -249,7 +246,6 @@ class WalletManager:
             return None
         return self.wallets.get(self.active_wallet_name)
     
-    # Modified method to support encryption
     def load_wallets(self, password: Optional[str] = None) -> None:
         """
         Load wallets from the wallet directory.
@@ -273,7 +269,6 @@ class WalletManager:
             except Exception as e:
                 print(f"Error loading wallet {wallet_file}: {e}")
     
-    # Modified method to support encryption
     def save_wallet(self, wallet_name: str) -> None:
         """
         Save a wallet to the wallet directory.
@@ -302,7 +297,6 @@ class WalletManager:
         except Exception:
             pass  # May not work on Windows
     
-    # Modified method to support save flag
     def add_wallet(self, wallet: Wallet, save: bool = True) -> None:
         """
         Add a wallet to the manager.
@@ -321,7 +315,6 @@ class WalletManager:
         if save:
             self.save_wallet(wallet.name)
     
-    # Keep existing method
     def add_wallet_from_private_key(self, name: str, private_key: str) -> Wallet:
         """
         Add a wallet from a private key.
@@ -337,7 +330,6 @@ class WalletManager:
         self.add_wallet(wallet)
         return wallet
     
-    # Keep existing method
     def add_wallet_from_mnemonic(self, name: str, mnemonic: str, path: str = "m/44'/60'/0'/0/0") -> Wallet:
         """
         Add a wallet from a mnemonic phrase.
@@ -354,7 +346,6 @@ class WalletManager:
         self.add_wallet(wallet)
         return wallet
     
-    # Keep existing method
     def remove_wallet(self, name: str) -> None:
         """
         Remove a wallet from the manager.
@@ -378,7 +369,6 @@ class WalletManager:
             if wallet_path.exists():
                 wallet_path.unlink()
     
-    # Keep existing method
     def set_active_wallet(self, name: str) -> None:
         """
         Set the active wallet.
@@ -399,7 +389,6 @@ class WalletManager:
         # Always update the client's wallet address
         self.client.wallet_address = active_wallet.address
     
-    # Keep existing method
     def list_wallets(self) -> List[Dict[str, Any]]:
         """
         List all available wallets.
@@ -417,7 +406,6 @@ class WalletManager:
             for name, wallet in self.wallets.items()
         ]
     
-    # Keep existing method
     def get_wallet(self, name: str) -> Wallet:
         """
         Get a wallet by name.
@@ -433,7 +421,6 @@ class WalletManager:
             
         return self.wallets[name]
 
-    # New method for wallet generation
     def generate_wallet(self, name: str) -> Wallet:
         """
         Generate a new wallet with secure randomness.
@@ -444,11 +431,8 @@ class WalletManager:
         Returns:
             Wallet: The generated wallet
         """
-        # Generate random bytes for the private key with strong entropy
-        import secrets
+        # Generate secure random private key
         private_key = "0x" + secrets.token_hex(32)
         
-        # Create and add the wallet
-        wallet = Wallet.from_private_key(name=name, private_key=private_key)
-        self.add_wallet(wallet)
-        return wallet
+        # Create wallet using the existing method
+        return self.add_wallet_from_private_key(name, private_key)
