@@ -7,11 +7,21 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Union
 
 from dotenv import load_dotenv
-from pydantic import BaseSettings, Field, validator
+from pydantic import BaseSettings, Field, validator, BaseModel
 
 # Load .env file if it exists
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
+
+
+class NetworkConfig(BaseModel):
+    """Configuration for a blockchain network."""
+    name: str
+    rpc_url: str
+    chain_id: int
+    explorer_url: Optional[str] = None
+    symbol: str = "ETH"
+    is_testnet: bool = False
 
 
 class MonadSettings(BaseSettings):
@@ -20,6 +30,29 @@ class MonadSettings(BaseSettings):
     # Network settings
     MONAD_RPC_URL: str = Field(..., description="Monad RPC endpoint URL")
     MONAD_CHAIN_ID: int = Field(2442, description="Monad chain ID")
+
+    # Network configurations
+    NETWORKS: Dict[str, Dict[str, Any]] = Field(
+        default_factory=lambda: {
+            "monad_mainnet": {
+                "name": "Monad Mainnet",
+                "rpc_url": "https://rpc.mainnet.monad.xyz/",
+                "chain_id": 2440,
+                "explorer_url": "https://explorer.monad.xyz",
+                "symbol": "MONAD",
+                "is_testnet": False
+            },
+            "monad_testnet": {
+                "name": "Monad Testnet",
+                "rpc_url": "https://rpc.testnet.monad.xyz/",
+                "chain_id": 2442,
+                "explorer_url": "https://explorer.testnet.monad.xyz",
+                "symbol": "MONAD",
+                "is_testnet": True
+            }
+        }
+    )
+    DEFAULT_NETWORK: str = Field("monad_testnet", description="Default network to use")
 
     # Wallet settings
     PRIVATE_KEY: str = Field(..., description="Private key for transaction signing")
@@ -57,6 +90,39 @@ class MonadSettings(BaseSettings):
         if v and not v.startswith("0x"):
             return f"0x{v}"
         return v
+        
+    @property
+    def networks(self) -> Dict[str, NetworkConfig]:
+        """Get all networks as NetworkConfig objects."""
+        return {
+            key: NetworkConfig(**value)
+            for key, value in self.NETWORKS.items()
+        }
+    
+    @property
+    def active_network(self) -> NetworkConfig:
+        """Get the active network configuration."""
+        return self.networks[self.DEFAULT_NETWORK]
+    
+    def __init__(self, *args, **kwargs):
+        """Initialize settings with environment variable overrides for networks."""
+        super().__init__(*args, **kwargs)
+        
+        # Look for network overrides in environment variables
+        for net_key, net_config in self.NETWORKS.items():
+            prefix = f"NETWORKS_{net_key.upper()}_"
+            
+            for key in net_config.keys():
+                env_key = f"{prefix}{key.upper()}"
+                if env_key in os.environ:
+                    self.NETWORKS[net_key][key] = os.environ[env_key]
+                    
+        # Individual RPC and chain ID settings still override the default network
+        if hasattr(self, "MONAD_RPC_URL") and self.MONAD_RPC_URL:
+            self.NETWORKS[self.DEFAULT_NETWORK]["rpc_url"] = self.MONAD_RPC_URL
+            
+        if hasattr(self, "MONAD_CHAIN_ID") and self.MONAD_CHAIN_ID:
+            self.NETWORKS[self.DEFAULT_NETWORK]["chain_id"] = self.MONAD_CHAIN_ID
 
     class Config:
         env_file = ".env"
@@ -82,74 +148,3 @@ def get_contract_addresses() -> Dict[str, str]:
             name = parts[0] + "".join(p.capitalize() for p in parts[1:])
             addresses[name] = value
     return addresses
-
-# Add this to config/settings.py
-class NetworkConfig(BaseModel):
-    """Configuration for a blockchain network."""
-    name: str
-    rpc_url: str
-    chain_id: int
-    explorer_url: Optional[str] = None
-    symbol: str = "ETH"
-    is_testnet: bool = False
-
-# Update MonadSettings class
-class MonadSettings(BaseSettings):
-    # Existing settings...
-    
-    # Add this for network configurations
-    NETWORKS: Dict[str, Dict[str, Any]] = Field(
-        default_factory=lambda: {
-            "monad_mainnet": {
-                "name": "Monad Mainnet",
-                "rpc_url": "https://rpc.mainnet.monad.xyz/",
-                "chain_id": 2440,
-                "explorer_url": "https://explorer.monad.xyz",
-                "symbol": "MONAD",
-                "is_testnet": False
-            },
-            "monad_testnet": {
-                "name": "Monad Testnet",
-                "rpc_url": "https://rpc.testnet.monad.xyz/",
-                "chain_id": 2442,
-                "explorer_url": "https://explorer.testnet.monad.xyz",
-                "symbol": "MONAD",
-                "is_testnet": True
-            }
-        }
-    )
-    DEFAULT_NETWORK: str = Field("monad_testnet", description="Default network to use")
-    
-    @property
-    def networks(self) -> Dict[str, NetworkConfig]:
-        """Get all networks as NetworkConfig objects."""
-        return {
-            key: NetworkConfig(**value)
-            for key, value in self.NETWORKS.items()
-        }
-    
-    @property
-    def active_network(self) -> NetworkConfig:
-        """Get the active network configuration."""
-        return self.networks[self.DEFAULT_NETWORK]
-    
-    # Allow environment variables to override network configurations
-    # e.g. NETWORKS_MONAD_TESTNET_RPC_URL=https://custom-rpc.example.com/
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        
-        # Look for network overrides in environment variables
-        for net_key, net_config in self.NETWORKS.items():
-            prefix = f"NETWORKS_{net_key.upper()}_"
-            
-            for key in net_config.keys():
-                env_key = f"{prefix}{key.upper()}"
-                if env_key in os.environ:
-                    self.NETWORKS[net_key][key] = os.environ[env_key]
-                    
-        # Individual RPC and chain ID settings still override the default network
-        if hasattr(self, "MONAD_RPC_URL") and self.MONAD_RPC_URL:
-            self.NETWORKS[self.DEFAULT_NETWORK]["rpc_url"] = self.MONAD_RPC_URL
-            
-        if hasattr(self, "MONAD_CHAIN_ID") and self.MONAD_CHAIN_ID:
-            self.NETWORKS[self.DEFAULT_NETWORK]["chain_id"] = self.MONAD_CHAIN_ID

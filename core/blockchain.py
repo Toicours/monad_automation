@@ -2,6 +2,7 @@
 Core blockchain interaction module for Monad.
 """
 import time
+import os
 from typing import Dict, Optional, Union, Any, Tuple, List
 
 from eth_account import Account
@@ -18,6 +19,7 @@ from .exceptions import (
     ContractError,
     BlockchainConnectionError,
     InsufficientFundsError,
+    ConfigurationError, 
 )
 
 

@@ -1,6 +1,7 @@
 """
 Wallet management module for Monad blockchain interaction.
 """
+
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,9 @@ from web3.types import TxParams, Wei, TxReceipt
 from ..config import settings
 from .exceptions import InsufficientFundsError, WalletError
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .blockchain import MonadClient
 
 class Wallet:
     """Individual wallet for blockchain interactions."""

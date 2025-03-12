@@ -5,6 +5,7 @@ Main entry point for Monad Automation CLI.
 import asyncio
 import os
 import sys
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 import click
@@ -15,6 +16,7 @@ from core.blockchain import MonadClient
 from core.exceptions import MonadError
 from tasks.base import BaseTask, TaskResult
 from utils.logger import logger, setup_logger
+from config.settings import settings, NetworkConfig 
 
 
 # Load environment variables
