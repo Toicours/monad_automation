@@ -5,6 +5,8 @@ A modular Python framework for automating tasks on the Monad blockchain network.
 ## Features
 
 - **Modular Architecture**: Easily add new task types without changing existing code
+- **Multi-Network Support**: Configure and switch between different EVM networks
+- **Secure Wallet Management**: Create, encrypt, and manage multiple wallets
 - **Robust Error Handling**: Graceful recovery from network issues and transaction failures
 - **Configuration Management**: Centralized settings with environment variable support
 - **Transaction Management**: Efficient gas estimation and transaction confirmation
@@ -112,10 +114,11 @@ Additional configuration can be set in `.env` file. See `.env.example` for all a
 The framework includes robust multi-wallet management:
 
 - **Add multiple wallets**: Add any number of wallets by name
+- **Generate new wallets**: Create new wallets with secure randomness
 - **Switch between wallets**: Easily change active wallet for operations
 - **Watch-only wallets**: Track balances for addresses without private keys
 - **Per-task wallet selection**: Specify which wallet to use for specific tasks
-- **Secure storage**: Private keys are stored securely and never exposed
+- **Encrypted storage**: Optional password protection for private keys
 
 ### Wallet CLI Commands
 
@@ -126,11 +129,20 @@ python main.py wallets list
 # Add a new wallet with private key
 python main.py wallets add wallet_name --private-key 0x123...
 
+# Generate a new wallet with secure randomness
+python main.py wallets generate wallet_name
+
 # Add a watch-only wallet (address only)
 python main.py wallets add watch_only --address 0xabc...
 
 # Set active wallet
 python main.py wallets set-active wallet_name
+
+# Enable wallet encryption
+python main.py wallets encrypt
+
+# Unlock encrypted wallets
+python main.py wallets unlock
 
 # Check wallet balance
 python main.py wallets balance wallet_name
@@ -145,6 +157,35 @@ black .
 isort .
 flake8
 ```
+
+## Network Management
+
+The framework supports multiple networks with easy switching:
+
+```bash
+# List available networks
+python main.py networks
+
+# Display current network info
+python main.py info
+
+# Set active network
+python main.py set-network monad_mainnet
+
+# Use specific network for a command
+python main.py dex swap ETH USDC 0.1 --network monad_testnet
+```
+
+You can add custom networks by updating the `NETWORKS` configuration in settings.py or by setting environment variables.
+
+## Security
+
+The project includes several security features:
+
+- **Wallet Encryption**: Optional password protection for private keys
+- **Secure Random Generation**: Cryptographically secure wallet generation
+- **File Permissions**: Restrictive permissions for wallet files
+- **Memory Management**: Private keys protected in memory
 
 ## Development
 
