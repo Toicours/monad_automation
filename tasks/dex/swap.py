@@ -5,10 +5,10 @@ from typing import List, Optional, Dict, Any, Union
 
 from pydantic import BaseModel, Field, validator
 
-from ...core.blockchain import MonadClient
-from ...core.exceptions import TaskConfigurationError
-from ...utils.helpers import validate_address, wei_to_ether, ether_to_wei
-from ..base import BaseTask
+from core.blockchain import MonadClient
+from core.exceptions import TaskConfigurationError
+from utils.helpers import validate_address, wei_to_ether, ether_to_wei
+from base import BaseTask
 
 
 class SwapParams(BaseModel):

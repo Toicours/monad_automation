@@ -8,6 +8,8 @@ setup(
         "web3>=6.10.0",
         "python-dotenv>=1.0.0",
         "pydantic>=2.5.0",
+        "pydantic-settings>=2.1.0",  # Added for BaseSettings support
+        "cryptography>=41.0.4",     # Added for wallet encryption
         "eth-account>=0.9.0",
         "eth-utils>=2.3.0",
         "eth-typing>=3.4.0",
@@ -36,11 +38,10 @@ setup(
         ],
     },
     python_requires=">=3.9",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="Toicours",
     description="Modular automation for Monad blockchain operations",
     keywords="blockchain, monad, automation, web3",
-    url="https://github.com/yourusername/monad-automation",
+    url="https://github.com/Toicours/monad-automation",
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",

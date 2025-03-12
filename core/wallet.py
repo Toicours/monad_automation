@@ -22,12 +22,12 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
-from ..config import settings
-from .exceptions import InsufficientFundsError, WalletError
+from config import settings
+from core.exceptions import InsufficientFundsError, WalletError
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from .blockchain import MonadClient
+    from blockchain import MonadClient
 
 class Wallet:
     """Individual wallet for blockchain interactions."""

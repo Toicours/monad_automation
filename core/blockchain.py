@@ -13,13 +13,13 @@ from web3.contract import Contract
 from web3.middleware import construct_sign_and_send_raw_middleware, geth_poa_middleware
 from web3.types import TxParams, Wei, TxReceipt
 
-from ..config import settings
-from .exceptions import (
+from config import settings
+from core.exceptions import (
     TransactionError,
     ContractError,
     BlockchainConnectionError,
     InsufficientFundsError,
-    ConfigurationError, 
+    ConfigurationError,
 )
 
 

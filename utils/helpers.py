@@ -10,7 +10,7 @@ from eth_utils import to_checksum_address, is_address
 from web3 import Web3
 
 from .logger import logger
-from ..core.exceptions import ValidationError
+from core.exceptions import ValidationError
 
 
 def load_abi(path: Union[str, Path]) -> List[Dict[str, Any]]:

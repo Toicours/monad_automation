@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Union
 
 from dotenv import load_dotenv
-from pydantic import BaseSettings, Field, validator, BaseModel
+from pydantic import Field, validator, BaseModel
+from pydantic_settings import BaseSettings
 
 # Load .env file if it exists
 env_path = Path(__file__).parent.parent / ".env"
@@ -55,8 +56,11 @@ class MonadSettings(BaseSettings):
     DEFAULT_NETWORK: str = Field("monad_testnet", description="Default network to use")
 
     # Wallet settings
-    PRIVATE_KEY: str = Field(..., description="Private key for transaction signing")
-    WALLET_ADDRESS: str = Field(..., description="Wallet address")
+    PRIVATE_KEY: Optional[str] = Field(None, description="Private key for transaction signing")
+    WALLET_ADDRESS: Optional[str] = Field(None, description="Wallet address")
+    DEFAULT_WALLET_NAME: Optional[str] = Field(None, description="Default wallet name")
+    DEFAULT_PRIVATE_KEY: Optional[str] = Field(None, description="Default wallet private key")
+    WALLET_DIRECTORY: str = Field("wallets", description="Directory for wallet storage")
 
     # Gas settings
     GAS_LIMIT: int = Field(3000000, description="Default gas limit for transactions")

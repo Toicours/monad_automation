@@ -8,7 +8,7 @@ from typing import Optional
 
 from loguru import logger
 
-from ..config.settings import settings
+from config.settings import settings
 
 
 def setup_logger(

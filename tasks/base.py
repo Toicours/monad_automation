@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, validator
 
-from ..core.blockchain import MonadClient
-from ..core.exceptions import TaskConfigurationError, TaskExecutionError
+from core.blockchain import MonadClient
+from core.exceptions import TaskConfigurationError, TaskExecutionError
 
 
 class TaskResult(BaseModel):
